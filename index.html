@@ -390,7 +390,12 @@ body.is-video-fullscreen.is-controls-hidden .va-transport { transform: translate
   border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
 }
 .va-fit-note b { color: var(--accent); }
-.va-fit-plot { flex: 1; min-height: 150px; padding: 0 10px 12px; }
+/* Anpassningen kan bli hög: statistik, ekvation, parametrar, tolkning och
+   diagram under varandra. Utan en egen rullningsyta hamnar diagrammet under
+   skärmkanten utan att gå att nå. flex: 1 0 auto låter det växa när det finns
+   plats, men aldrig klämmas ihop — då rullar panelen i stället. */
+.va-panel[data-panel="fit"] { overflow-y: auto; }
+.va-fit-plot { flex: 1 0 auto; min-height: 240px; padding: 0 10px 12px; }
 .va-fit-plot canvas { width: 100%; display: block; border-radius: var(--radius-sm); }
 
 /* Inställningar */
@@ -526,7 +531,9 @@ body.va-no-video .va-table-wrap { max-width: 1180px; margin: 0 auto; }
 .va-track-add.is-angle { border-color: var(--gold); color: var(--gold-ink); border-style: solid; }
 .va-track-add.is-angle:hover { background: color-mix(in srgb, var(--gold) 12%, transparent); }
 .va-angle-body { padding: 14px 18px; }
-.va-stats { flex: none; padding: 12px 14px 4px; }
+/* Sju statistikkolumner får inte plats i en smal panel — låt dem rullas i
+   sidled i stället för att klippas vid min och max. */
+.va-stats { flex: none; padding: 12px 14px 4px; overflow-x: auto; }
 .va-stats-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px;
   width: 100%; padding: 0; background: none; border: none; color: inherit; text-align: left; cursor: pointer;
@@ -634,10 +641,6 @@ body.va-no-video .va-table-wrap { max-width: 1180px; margin: 0 auto; }
 
   /* Inställningarna blir läsbara med etiketten över kontrollen i stället för
      bredvid — annars klämt ihop till en remsa i högerkanten. */
-  /* Sju statistikkolumner får inte plats i en telefonbredd — låt dem skrollas
-     i sidled i stället för att klippas vid min och max. */
-  .va-stats { overflow-x: auto; }
-
   .va-set-row { flex-wrap: wrap; gap: 6px 12px; }
   .va-set-row > label:first-child { flex: 1 0 100%; }
   .va-set-row select, .va-set-row input[type="range"] { flex: 1; min-width: 0; width: auto; }
@@ -1173,6 +1176,10 @@ var VAI18N = (function () {
     'fit.interpretation': 'Tolkning',
     'fit.accel': 'Acceleration a = 2c₂ = {v} {u}',
     'fit.velocity': 'Hastighet v = k = {v} {u}',
+    'fit.accelSlope': 'Acceleration a = k = {v} {u}',
+    'fit.omegaSlope': 'Vinkelhastighet ω = k = {v} {u}',
+    'fit.alphaSlope': 'Vinkelacceleration α = k = {v} {u}',
+    'fit.slope': 'Lutning k = {v} {u}',
     'fit.period': 'Period T = {v} s',
     'fit.frequency': 'Frekvens f = {v} Hz',
     'fit.tau': 'Tidskonstant τ = {v} s',
@@ -1504,6 +1511,10 @@ var VAI18N = (function () {
     'fit.interpretation': 'Interpretation',
     'fit.accel': 'Acceleration a = 2c₂ = {v} {u}',
     'fit.velocity': 'Velocity v = k = {v} {u}',
+    'fit.accelSlope': 'Acceleration a = k = {v} {u}',
+    'fit.omegaSlope': 'Angular velocity ω = k = {v} {u}',
+    'fit.alphaSlope': 'Angular acceleration α = k = {v} {u}',
+    'fit.slope': 'Slope k = {v} {u}',
     'fit.period': 'Period T = {v} s',
     'fit.frequency': 'Frequency f = {v} Hz',
     'fit.tau': 'Time constant τ = {v} s',
@@ -6990,6 +7001,47 @@ var VAEngine = (function () {
     if (!hasRange()) host.appendChild(el('div', 'va-set-hint', T('stats.hint')));
   }
 
+  /**
+   * Vilken storhet som ligger på y-axeln. Det avgör vad lutningen betyder:
+   * läge mot tid ger hastighet, hastighet mot tid ger acceleration — samma
+   * räta linje, olika fysik. För en importerad sensorkanal vet vi inte vad
+   * den föreställer, och då får lutningen heta just lutning.
+   */
+  function fittedQuantity(res) {
+    var k = res.channel ? res.channel.key : res.variable;
+    if (res.dataset.kind === 'track') {
+      if (k === 'x' || k === 'y' || k === 'r') return 'position';
+      if (k === 'vx' || k === 'vy' || k === 'speed') return 'velocity';
+    } else if (res.dataset.kind === 'angle') {
+      if (k === 'theta') return 'angle';
+      if (k === 'omega') return 'angularVelocity';
+    }
+    return 'other';
+  }
+
+  /** Enheten per sekund till: m/s blir m/s², inte m/s/s. */
+  function perSecond(unit) {
+    if (!unit) return '1/s';
+    if (unit.slice(-2) === '/s') return unit.slice(0, -2) + '/s²';
+    if (unit.slice(-3) === '/s²') return unit.slice(0, -3) + '/s³';
+    return unit + '/s';
+  }
+  function perSecondN(unit, n) {
+    var out = unit;
+    for (var i = 0; i < n; i++) out = perSecond(out);
+    return out;
+  }
+
+  /**
+   * En uppmätt acceleration i meter kan vara tyngdaccelerationen — både ur en
+   * andragradsanpassning av läget och ur lutningen på en hastighetskurva.
+   */
+  function gravityNote(a, res) {
+    if (res.dataset.kind !== 'track' || !P.calib.set || P.calib.unit !== 'm') return null;
+    if (!(Math.abs(a) > 1 && Math.abs(a) < 40)) return null;
+    return T('fit.gCompare', { v: numRaw2((Math.abs(a) - 9.82) / 9.82 * 100) });
+  }
+
   function renderFit() {
     var host = $('va-fit-result');
     host.innerHTML = '';
@@ -7015,19 +7067,28 @@ var VAEngine = (function () {
     eq.textContent = fitEquationText(res);
     if (f.type === 'poly') {
       for (var j = 0; j < f.coef.length; j++) {
-        addParam('c' + subDigit(j), f.coef[j], f.se[j], j === 0 ? u : u + '/s' + (j > 1 ? supDigit(j) : ''));
+        addParam('c' + subDigit(j), f.coef[j], f.se[j], perSecondN(u, j));
       }
+      var quantity = fittedQuantity(res);
       if (f.degree === 1) {
-        notes.push(T('fit.velocity', { v: fmtErrLocal(f.coef[1], f.se[1]), u: u + '/s' }));
+        var slope = { v: fmtErrLocal(f.coef[1], f.se[1]), u: perSecond(u) };
+        if (quantity === 'position') notes.push(T('fit.velocity', slope));
+        else if (quantity === 'velocity') {
+          notes.push(T('fit.accelSlope', slope));
+          var g1 = gravityNote(f.coef[1], res);
+          if (g1) notes.push(g1);
+        } else if (quantity === 'angle') notes.push(T('fit.omegaSlope', slope));
+        else if (quantity === 'angularVelocity') notes.push(T('fit.alphaSlope', slope));
+        else notes.push(T('fit.slope', slope));
       }
-      if (f.degree === 2) {
+      // 2c₂ är accelerationen bara när det är läget som anpassas. På en
+      // hastighetskurva vore samma tal accelerationens ändringstakt, och det
+      // är inte något man vill få presenterat som en acceleration.
+      if (f.degree === 2 && quantity === 'position') {
         var a = 2 * f.coef[2], aerr = 2 * f.se[2];
-        notes.push(T('fit.accel', { v: fmtErrLocal(a, aerr), u: u + '/s²' }));
-        if (res.dataset.kind === 'track' && (v === 'x' || v === 'y' || v === 'r') &&
-          P.calib.set && P.calib.unit === 'm' && Math.abs(a) > 1 && Math.abs(a) < 40) {
-          var dev = (Math.abs(a) - 9.82) / 9.82 * 100;
-          notes.push(T('fit.gCompare', { v: numRaw2(dev) }));
-        }
+        notes.push(T('fit.accel', { v: fmtErrLocal(a, aerr), u: perSecondN(u, 2) }));
+        var g2 = gravityNote(a, res);
+        if (g2) notes.push(g2);
       }
     } else if (f.type === 'sine') {
       addParam('A', f.A, null, u);
