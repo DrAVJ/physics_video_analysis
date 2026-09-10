@@ -1300,6 +1300,11 @@ var VAI18N = (function () {
     'angle.rps': 'varv/s',
     'angle.source': 'vinkel {a} → {b}',
     'angle.create': 'Vinkel',
+    'angle.start': 'Rotation',
+    'angle.centre': 'Mitt',
+    'angle.mark': 'Märke',
+    'angle.setupHint': 'Rotation: markera {a} på föremålet och spåra den. Byt sedan spår och gör samma sak med {b} — vinkeln kommer ur vektorn mellan dem.',
+    'angle.setupDone': 'Två spår för rotationen: {a} och {b}. Markera dem i tur och ordning.',
     'angle.title': 'Vinkel mellan två spår',
     'angle.intro': 'Spåra två punkter på samma föremål — till exempel bollens mitt och ett märke på bollen. Vektorn mellan dem vänder sig med rotationen, och verktyget räknar ut vinkel, vinkelhastighet och vinkelacceleration. Varven räknas ihop, så kurvan hoppar inte vid 180°.',
     'angle.name': 'Namn',
@@ -1635,6 +1640,11 @@ var VAI18N = (function () {
     'angle.rps': 'turns/s',
     'angle.source': 'angle {a} → {b}',
     'angle.create': 'Angle',
+    'angle.start': 'Rotation',
+    'angle.centre': 'Centre',
+    'angle.mark': 'Mark',
+    'angle.setupHint': 'Rotation: mark {a} on the object and track it. Then switch track and do the same for {b} — the angle comes from the vector between them.',
+    'angle.setupDone': 'Two tracks for the rotation: {a} and {b}. Mark them one at a time.',
     'angle.title': 'Angle between two tracks',
     'angle.intro': 'Track two points on the same object — for example the centre of the ball and a mark on it. The vector between them turns with the rotation, and the tool derives angle, angular velocity and angular acceleration. Turns are accumulated, so the curve does not jump at 180°.',
     'angle.name': 'Name',
@@ -4283,15 +4293,70 @@ var VAEngine = (function () {
     $('va-angle-ok').disabled = same || !preview.n;
   }
 
+  /** Ett vinkelpar: vektorn från ett spår till ett annat, och vad den kallas. */
+  function newAngleSpec(aTrack, bTrack, unit, name) {
+    if (!P.angles) P.angles = [];
+    return {
+      id: 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1000),
+      name: name || (T('angle.create') + ' ' + (P.angles.length + 1)),
+      color: ANGLE_COLORS[P.angles.length % ANGLE_COLORS.length],
+      aTrack: aTrack, bTrack: bTrack, unit: unit || 'deg'
+    };
+  }
+
+  /**
+   * Rotationsmätningen, från början.
+   *
+   * Vinkeln kommer ur vektorn mellan två spårade punkter på samma föremål —
+   * bollens mitt och ett märke på den. Knappen visades förut bara när två spår
+   * redan hade punkter, vilket gjorde funktionen omöjlig att hitta för den som
+   * ville mäta en rotation: man måste redan veta hur den fungerade för att se
+   * att den fanns. Nu ställer knappen i ordning de två spåren och paret mellan
+   * dem, och säger vad som ska markeras.
+   */
+  function startRotation() {
+    if (!UI.ready) return;
+    if (P.tracks.filter(function (t) { return t.points.length > 1; }).length >= 2) {
+      openAngleDialog();
+      return;
+    }
+    pushUndo();
+    // Ett orört förstaspår får rollnamnet; ett som användaren själv döpt eller
+    // redan spårat lämnas i fred.
+    var first = P.tracks[0];
+    if (first && !first.points.length && first.name === T('track.default', { n: 1 })) {
+      first.name = T('angle.centre');
+    }
+    while (P.tracks.length < 2) {
+      var extra = newTrack(P.tracks.length);
+      extra.name = T('angle.mark');
+      P.tracks.push(extra);
+    }
+    var a = P.tracks[0], b = P.tracks[1];
+    var paired = (P.angles || []).some(function (s) {
+      return (s.aTrack === a.id && s.bTrack === b.id) || (s.aTrack === b.id && s.bTrack === a.id);
+    });
+    if (!paired) {
+      if (!P.angles) P.angles = [];
+      P.angles.push(newAngleSpec(a.id, b.id));
+    }
+    selectSource('track', 0);
+    setMode('mark');
+    // setMode skriver sin egen ledtråd i bandet — vår ska stå kvar, så den
+    // sätts efteråt.
+    $('va-stage-msg-text').textContent = T('angle.setupHint', { a: a.name, b: b.name });
+    $('va-stage-msg').hidden = false;
+    invalidate();
+    renderAll();
+    saveSession();
+    toast(T('angle.setupDone', { a: a.name, b: b.name }), 'ok');
+  }
+
   function confirmAngle() {
     if (!angleDraft || angleDraft.aTrack === angleDraft.bTrack) return;
     if (!P.angles) P.angles = [];
     pushUndo();
-    P.angles.push({
-      id: 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1000),
-      name: angleDraft.name, color: ANGLE_COLORS[P.angles.length % ANGLE_COLORS.length],
-      aTrack: angleDraft.aTrack, bTrack: angleDraft.bTrack, unit: angleDraft.unit
-    });
+    P.angles.push(newAngleSpec(angleDraft.aTrack, angleDraft.bTrack, angleDraft.unit, angleDraft.name));
     $('va-angle-modal').hidden = true;
     angleDraft = null;
     invalidate();
@@ -5925,12 +5990,14 @@ var VAEngine = (function () {
       box.appendChild(chip);
     });
 
-    if (P.tracks.filter(function (t) { return t.points.length > 1; }).length >= 2) {
+    // Alltid framme så länge det finns en film: den som vill mäta en rotation
+    // ska kunna se att det går, inte behöva veta det i förväg.
+    if (UI.ready) {
       var angBtn = el('button', 'va-track-add is-angle');
       angBtn.id = 'va-btn-angle';
       angBtn.innerHTML = '<svg class="ic" style="width:13px;height:13px"><use href="#i-angle"/></svg>';
-      angBtn.appendChild(el('span', null, T('angle.create')));
-      angBtn.onclick = openAngleDialog;
+      angBtn.appendChild(el('span', null, T('angle.start')));
+      angBtn.onclick = startRotation;
       box.appendChild(angBtn);
     }
 
@@ -8177,12 +8244,7 @@ var VAEngine = (function () {
       addAngle: function (aTrack, bTrack, unit, name) {
         if (!P.angles) P.angles = [];
         pushUndo();
-        P.angles.push({
-          id: 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1000),
-          name: name || (T('angle.create') + ' ' + (P.angles.length + 1)),
-          color: ANGLE_COLORS[P.angles.length % ANGLE_COLORS.length],
-          aTrack: aTrack, bTrack: bTrack, unit: unit || 'deg'
-        });
+        P.angles.push(newAngleSpec(aTrack, bTrack, unit, name));
         invalidate();
         selectSource('angle', P.angles.length - 1);
         saveSession();
