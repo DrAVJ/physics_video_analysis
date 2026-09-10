@@ -527,7 +527,13 @@ body.va-no-video .va-table-wrap { max-width: 1180px; margin: 0 auto; }
 .va-track-add.is-angle:hover { background: color-mix(in srgb, var(--gold) 12%, transparent); }
 .va-angle-body { padding: 14px 18px; }
 .va-stats { flex: none; padding: 12px 14px 4px; }
-.va-stats-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.va-stats-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px;
+  width: 100%; padding: 0; background: none; border: none; color: inherit; text-align: left; cursor: pointer;
+}
+.va-stats-chev { align-self: center; color: var(--faint); display: flex; }
+.va-stats-chev .ic { width: 14px; height: 14px; transition: transform .15s ease; }
+.va-stats.is-open .va-stats-chev .ic { transform: rotate(180deg); }
 .va-stats-scope { font-size: 11.5px; color: var(--gold-ink); }
 .va-stats-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .va-stats-table th { font-size: 10.5px; font-weight: 600; color: var(--muted); text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -581,6 +587,61 @@ body.va-no-video .va-table-wrap { max-width: 1180px; margin: 0 auto; }
      ska göra härnäst) — på en 40vh-hög mobilyta gör den bara skada, den
      täcker en fjärdedel av videon rakt över skalstickan/origo. */
   .va-steps { display: none; }
+
+  /* Fliken avgör vad skärmen används till. Diagram, analys och inställningar
+     får hela ytan: på en telefon går det ändå inte att se filmen och ett
+     diagram samtidigt på ett vettigt sätt, och halva diagram är oläsliga.
+     (:not(.is-video-fullscreen) — i fullskärmsläget äger duken skärmen.) */
+  body.va-tab-chart:not(.is-video-fullscreen) .va-stage-col,
+  body.va-tab-fit:not(.is-video-fullscreen) .va-stage-col,
+  body.va-tab-settings:not(.is-video-fullscreen) .va-stage-col { display: none; }
+
+  /* Datafliken är den enda där filmen och panelen hör ihop: man markerar
+     rader i tabellen och ser på filmen vilka punkter det blev. Där delar de
+     på skärmen i stället — men bara om panelens egen inredning håller sig
+     kort, annars äter spårchippen och exportknapparna upp hela tabellen. */
+  body.va-tab-data .va-stage-wrap { height: 28vh; }
+  .va-tracks { flex-wrap: nowrap; overflow-x: auto; padding: 7px 10px; }
+  .va-tracks > * { flex: none; }
+  /* En rad knappar som kan skrollas i sidled i stället för tre staplade rader.
+     Markera/ta bort/ångra läggs först — det är dem man är här för; export
+     får hamna en tumrörelse bort. */
+  .va-panel-foot { padding: 7px 10px; flex-wrap: nowrap; overflow-x: auto; }
+  .va-panel-foot > * { flex: none; }
+  #va-btn-select-rows { order: -3; }
+  #va-btn-delete-rows { order: -2; }
+  #va-btn-undo-track { order: -1; }
+  /* Ikon räcker för export; orden behövs på knapparna man faktiskt väljer med. */
+  #va-btn-csv span, #va-btn-clip span, #va-btn-json span { display: none; }
+  /* Antalet punkter står redan i tabellen — här tvingar texten bara fram
+     ytterligare en rad knappar. */
+  .va-foot-info { display: none; }
+
+  /* Varje rad verktyg som viker sig till två eller tre rader är en rad
+     tabell mindre. Zoomknapparna behövs inte längre: man nyper i duken,
+     och ⛶ återställer. Första/sista bildrutan når man i tidslinjen. */
+  #va-btn-zoomin, #va-btn-zoomout, #va-zoom-label { display: none; }
+  #va-btn-first, #va-btn-last { display: none; }
+  .va-tool { padding: 8px 7px; }
+  .va-toolbar { padding: 6px 8px; gap: 4px; }
+  /* Nio ikoner får plats på en rad — men bara utan avdelarna mellan grupperna
+     och utan margin-left:auto, som annars knuffar ⛶ till en egen rad. En
+     halvtom rad verktyg kostar lika mycket höjd som sex rader tabell. */
+  .va-tool-group + .va-tool-group { margin-left: 2px; padding-left: 2px; border-left: none; }
+  .va-tool-right { margin-left: 2px !important; }
+  .va-transport { padding: 6px 8px; }
+  .va-frame-readout { margin: 0 6px; gap: 7px; }
+
+  /* Inställningarna blir läsbara med etiketten över kontrollen i stället för
+     bredvid — annars klämt ihop till en remsa i högerkanten. */
+  /* Sju statistikkolumner får inte plats i en telefonbredd — låt dem skrollas
+     i sidled i stället för att klippas vid min och max. */
+  .va-stats { overflow-x: auto; }
+
+  .va-set-row { flex-wrap: wrap; gap: 6px 12px; }
+  .va-set-row > label:first-child { flex: 1 0 100%; }
+  .va-set-row select, .va-set-row input[type="range"] { flex: 1; min-width: 0; width: auto; }
+  .va-settings { padding: 4px 16px 28px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
@@ -3489,7 +3550,11 @@ var VAEngine = (function () {
     sensorChannels: null, annotate: false, annotTool: 'text',
     compareChannels: {}, compareNormalize: true,
     selectedAnnotation: null, ready: false,
-    trackResume: null, lastAutoTrack: null, trackPreview: null
+    trackResume: null, lastAutoTrack: null, trackPreview: null,
+    // null = följ skärmen: utfälld där det finns plats, infälld på en telefon
+    // där statistiken annars äter upp den höjd diagrammet behöver. Så fort
+    // användaren fäller den själv gäller det valet i stället.
+    statsOpen: null
   };
   var undoStack = [], redoStack = [];
   var engine = null, seriesCache = null, currentObjectUrl = null;
@@ -4994,12 +5059,28 @@ var VAEngine = (function () {
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.globalAlpha = 1;
+        // Ett markerat intervall i tabellen ringas in på filmen också, i samma
+        // guldton som de markerade raderna. Det är så man ser att det är just
+        // de punkterna som försvinner med Ta bort markerade.
+        var marking = isActive && hasRange();
+        var t0 = UI.range.t0, t1 = UI.range.t1;
         track.points.forEach(function (p) {
           var s = v2s(p.x, p.y);
-          ctx.beginPath(); ctx.arc(s.x, s.y, isActive ? 3 : 2.2, 0, 6.2832);
+          var inRange = false;
+          if (marking) {
+            var t = timeOf(p.f);
+            inRange = t >= t0 - 1e-12 && t <= t1 + 1e-12;
+          }
+          ctx.beginPath(); ctx.arc(s.x, s.y, inRange ? 4 : (isActive ? 3 : 2.2), 0, 6.2832);
           ctx.fillStyle = track.color;
           ctx.globalAlpha = p.f === cur ? 1 : (isActive ? 0.75 : 0.42);
           ctx.fill();
+          if (inRange) {
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = '#ffd166';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(s.x, s.y, 7.5, 0, 6.2832); ctx.stroke();
+          }
         });
         ctx.globalAlpha = 1;
       }
@@ -5957,7 +6038,7 @@ var VAEngine = (function () {
       if ((ev.shiftKey || UI.rangeArm) && UI.anchorRow !== null && UI.anchorRow < ds.n) {
         var a = Math.min(UI.anchorRow, row), b = Math.max(UI.anchorRow, row);
         UI.range = { t0: ds.t[a], t1: ds.t[b] };
-        refreshSide(); refreshCharts();
+        rangeChanged();
         return;
       }
       UI.anchorRow = row;
@@ -6394,7 +6475,7 @@ var VAEngine = (function () {
     return [{
       series: series, xLabel: 't (s)',
       yLabel: norm ? T('compare.normalized') : units.join(' / '),
-      height: 320, timeAxis: true, annotationKey: 'compare',
+      height: chartHeight(320, 1), timeAxis: true, annotationKey: 'compare',
       selection: selectionRangeTime()
     }];
   }
@@ -6443,18 +6524,19 @@ var VAEngine = (function () {
           pts: d.frames.map(function (f, i) { return { x: d.x[i], y: d.y[i], f: f }; })
         };
       });
-      return [{ series: series, xLabel: 'x (' + unitName() + ')', yLabel: 'y (' + unitName() + ')', equalAspect: true, height: 260, annotationKey: 'traj' }];
+      return [{ series: series, xLabel: 'x (' + unitName() + ')', yLabel: 'y (' + unitName() + ')', equalAspect: true, height: chartHeight(260, 1), annotationKey: 'traj' }];
     }
     if (preset === 'all') {
+      var h3 = chartHeight(168, 3);
       return [
-        { series: seriesFrom('pos'), xLabel: tLabel, yLabel: unitName(), height: 168, selection: selectionRangeTime(), fit: fitSpec && fitSpec.kind === 'pos' ? fitSpec : null, annotationKey: 'pos', timeAxis: true },
-        { series: seriesFrom('vel'), xLabel: tLabel, yLabel: unitVel(), height: 168, selection: selectionRangeTime(), fit: fitSpec && fitSpec.kind === 'vel' ? fitSpec : null, annotationKey: 'vel', timeAxis: true },
-        { series: seriesFrom('acc'), xLabel: tLabel, yLabel: unitAcc(), height: 168, selection: selectionRangeTime(), fit: fitSpec && fitSpec.kind === 'acc' ? fitSpec : null, annotationKey: 'acc', timeAxis: true }
+        { series: seriesFrom('pos'), xLabel: tLabel, yLabel: unitName(), height: h3, selection: selectionRangeTime(), fit: fitSpec && fitSpec.kind === 'pos' ? fitSpec : null, annotationKey: 'pos', timeAxis: true },
+        { series: seriesFrom('vel'), xLabel: tLabel, yLabel: unitVel(), height: h3, selection: selectionRangeTime(), fit: fitSpec && fitSpec.kind === 'vel' ? fitSpec : null, annotationKey: 'vel', timeAxis: true },
+        { series: seriesFrom('acc'), xLabel: tLabel, yLabel: unitAcc(), height: h3, selection: selectionRangeTime(), fit: fitSpec && fitSpec.kind === 'acc' ? fitSpec : null, annotationKey: 'acc', timeAxis: true }
       ];
     }
     var unit = preset === 'pos' ? unitName() : preset === 'vel' ? unitVel() : unitAcc();
     return [{
-      series: seriesFrom(preset), xLabel: tLabel, yLabel: unit, height: 300,
+      series: seriesFrom(preset), xLabel: tLabel, yLabel: unit, height: chartHeight(300, 1),
       selection: selectionRangeTime(),
       fit: fitSpec && fitSpec.kind === preset ? fitSpec : null,
       annotationKey: preset, timeAxis: true
@@ -6543,6 +6625,22 @@ var VAEngine = (function () {
 
   function updateNoVideo() {
     document.body.classList.toggle('va-no-video', !engine || !UI.ready);
+  }
+
+  /**
+   * Diagrammets höjd i bildpunkter.
+   *
+   * På en telefon döljs filmen på diagram- och analysfliken, och då ska
+   * diagrammet fylla ytan i stället för att ligga som en remsa högst upp.
+   * Ligger flera diagram i samma vy får de dela på höjden och skrollas
+   * mellan. På en stor skärm gäller de fasta höjderna som förut.
+   */
+  function chartHeight(base, count, host) {
+    if (window.innerWidth > 900) return base;
+    var box = host || $('va-charts');
+    var avail = box ? box.clientHeight : 0;
+    if (avail < 200) return base;
+    return Math.max(base, Math.round(count > 1 ? avail * 0.6 : avail - 18));
   }
 
   function buildCharts() {
@@ -6723,7 +6821,7 @@ var VAEngine = (function () {
         }
       }
     });
-    on(cv, 'dblclick', function () { UI.range = { t0: null, t1: null }; refreshSide(); });
+    on(cv, 'dblclick', function () { UI.range = { t0: null, t1: null }; rangeChanged(); });
   }
 
   function setFitRangeFromTime(ta, tb) {
@@ -6740,10 +6838,22 @@ var VAEngine = (function () {
     UI.range = { t0: lo, t1: hi };
     syncFitInputs();
     refreshCharts();
+    renderStage();
   }
 
   function refreshCharts() {
     if (UI.tab === 'chart') buildCharts();
+  }
+
+  /**
+   * Efter en ändrad markering. Tabellen, diagrammen och duken visar samma
+   * intervall — raderna, den skuggade zonen och ringarna runt punkterna på
+   * filmen — så de tre ritas alltid om tillsammans.
+   */
+  function rangeChanged() {
+    refreshSide();
+    refreshCharts();
+    renderStage();
   }
 
   // ================================================================ Kurvanpassning
@@ -6823,7 +6933,13 @@ var VAEngine = (function () {
     return { min: lo, max: hi };
   }
 
-  /** Statistik för varje kanal över det markerade intervallet. */
+  /**
+   * Statistik för varje kanal över det markerade intervallet.
+   *
+   * Rubriken är en knapp som fäller ut och in tabellen. På en telefon delar
+   * statistiken och diagrammet på samma skärm, och då är det diagrammet som
+   * ska ha höjden tills man vill se siffrorna.
+   */
   function renderStats() {
     var host = $('va-stats');
     host.innerHTML = '';
@@ -6831,12 +6947,21 @@ var VAEngine = (function () {
     if (!ds.n) return;
     var rows = rowsInRange(ds);
 
-    var head = el('div', 'va-stats-head');
+    var open = UI.statsOpen === null ? window.innerWidth > 900 : UI.statsOpen;
+    var head = el('button', 'va-stats-head');
+    head.type = 'button';
+    head.setAttribute('aria-expanded', open ? 'true' : 'false');
     head.appendChild(el('span', 'va-set-title', T('stats.title')));
     head.appendChild(el('span', 'va-stats-scope', hasRange()
       ? T('stats.selection') + ': ' + numRaw(UI.range.t0, 3) + ' – ' + numRaw(UI.range.t1, 3) + ' s'
       : T('stats.whole')));
+    var chev = el('span', 'va-stats-chev');
+    chev.innerHTML = '<svg class="ic"><use href="#i-chevron"/></svg>';
+    head.appendChild(chev);
+    head.onclick = function () { UI.statsOpen = !open; refreshSide(); };
     host.appendChild(head);
+    host.classList.toggle('is-open', open);
+    if (!open) return;
 
     var keys = ['stats.n', 'stats.mean', 'stats.sd', 'stats.sem', 'stats.min', 'stats.max', 'stats.median'];
     var thead = '<tr><th></th>' + keys.map(function (k) { return '<th>' + T(k) + '</th>'; }).join('') + '</tr>';
@@ -6966,7 +7091,7 @@ var VAEngine = (function () {
       all.push({ x: ds.t[i], y: ch.values[i], f: ds.frames ? ds.frames[i] : null, row: i });
     }
     drawChart(cv, {
-      height: 210,
+      height: chartHeight(210, 1, cv.parentNode),
       series: [{ label: ch.label, color: CHART_X_COLOR, pts: all, showLine: false }],
       fit: res.fit ? { fn: res.fit.predict, from: res.tmin, to: res.tmax, color: '#ff5c8a' } : null,
       selection: selectionRangeTime(),
@@ -7637,7 +7762,17 @@ var VAEngine = (function () {
     for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('is-active', tabs[i].getAttribute('data-tab') === tab);
     var panels = document.querySelectorAll('.va-panel');
     for (i = 0; i < panels.length; i++) panels[i].classList.toggle('is-active', panels[i].getAttribute('data-panel') === tab);
+    // Vilken flik som är framme styr mobillayouten: diagram, analys och
+    // inställningar tar hela skärmen, medan datafliken delar den med filmen.
+    // På en telefon går det ändå inte att se filmen och ett diagram samtidigt
+    // på ett vettigt sätt — och tabellen behöver filmen bredvid sig.
+    ['data', 'chart', 'fit', 'settings'].forEach(function (t) {
+      document.body.classList.toggle('va-tab-' + t, t === tab);
+    });
     refreshSide();
+    // Duken byter storlek när flikbytet visar eller döljer den.
+    renderStage();
+    renderTimeline();
   }
 
   function applySideWidth(px) {
@@ -7924,17 +8059,17 @@ var VAEngine = (function () {
     on($('va-fit-from'), 'change', function () {
       var v = parseFloat(String(this.value).replace(',', '.'));
       UI.range.t0 = isFinite(v) ? v : null;
-      refreshSide(); refreshCharts();
+      rangeChanged();
     });
     on($('va-fit-to'), 'change', function () {
       var v = parseFloat(String(this.value).replace(',', '.'));
       UI.range.t1 = isFinite(v) ? v : null;
-      refreshSide(); refreshCharts();
+      rangeChanged();
     });
     on($('va-fit-reset'), 'click', function () {
       UI.range = { t0: null, t1: null };
       UI.anchorRow = null;
-      refreshSide(); refreshCharts();
+      rangeChanged();
     });
 
     // Filinmatning
@@ -8029,7 +8164,7 @@ var VAEngine = (function () {
       },
       datasets: allDatasets,
       addAnnotation: addAnnotation,
-      setRange: function (t0, t1) { UI.range = { t0: t0, t1: t1 }; refreshSide(); refreshCharts(); },
+      setRange: function (t0, t1) { UI.range = { t0: t0, t1: t1 }; rangeChanged(); },
       stats: function () {
         var ds = activeDataset(), rows = rowsInRange(ds), out = {};
         ds.channels.forEach(function (ch) {
